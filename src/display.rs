@@ -16,11 +16,11 @@ pub struct DisplayDriver {
 }
 
 impl DisplayDriver {
-    pub fn new(sdl_context: &sdl2::Sdl) -> Self {
+    pub fn new(sdl_context: &sdl2::Sdl, title: &str) -> Self {
         let video_subsys = sdl_context.video().unwrap();
         let window = video_subsys
             .window(
-                "rust-sdl2_gfx: draw line & FPSManager",
+                title,
                 SCREEN_WIDTH,
                 SCREEN_HEIGHT,
             )

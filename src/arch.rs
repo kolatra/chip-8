@@ -130,15 +130,13 @@ impl CPU {
     fn set_reg(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
         let nn = (opcode & 0x00FF) as u8;
-        println!("x:{} nn:{}", x, nn);
         self.registers[x] = nn;
     }
 
     fn add(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
         let nn = (opcode & 0x00FF) as u8;
-        println!("{} + {}", self.registers[x], nn);
-        let _ = self.registers[x].wrapping_add(nn);
+        self.registers[x] = self.registers[x].wrapping_add(nn);
     }
 
     fn set_reg_2(&mut self, opcode: u16) {

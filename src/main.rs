@@ -23,7 +23,7 @@ fn main() -> Result<(), String> {
     cpu.load_rom(rom);
 
     let sdl_context = sdl2::init()?;
-    let mut display_driver = display::DisplayDriver::new(&sdl_context);
+    let mut display_driver = display::DisplayDriver::new(&sdl_context, "chip-8 emulator");
     let mut event_pump = sdl_context.event_pump()?;
 
     'running: loop {
