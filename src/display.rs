@@ -19,11 +19,7 @@ impl DisplayDriver {
     pub fn new(sdl_context: &sdl2::Sdl, title: &str) -> Self {
         let video_subsys = sdl_context.video().unwrap();
         let window = video_subsys
-            .window(
-                title,
-                SCREEN_WIDTH,
-                SCREEN_HEIGHT,
-            )
+            .window(title, SCREEN_WIDTH, SCREEN_HEIGHT)
             .position_centered()
             .opengl()
             .build()
@@ -45,7 +41,12 @@ impl DisplayDriver {
                 let y = (y as u32) * SCALE_FACTOR;
 
                 self.canvas.set_draw_color(color(col));
-                let _ = self.canvas.fill_rect(Rect::new(x as i32, y as i32, SCALE_FACTOR, SCALE_FACTOR));
+                let _ = self.canvas.fill_rect(Rect::new(
+                    x as i32,
+                    y as i32,
+                    SCALE_FACTOR,
+                    SCALE_FACTOR,
+                ));
             }
         }
         self.canvas.present();

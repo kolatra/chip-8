@@ -8,7 +8,7 @@ pub struct CPU {
     pub delay_timer: u8,
     pub sound_timer: u8,
     // 0-f
-    pub keys: [u8; 16],
+    pub keys: [bool; 16],
     pub display: [[u8; 64]; 32],
 
     pub draw_flag: bool,
@@ -25,7 +25,7 @@ impl CPU {
             sp: 0,
             delay_timer: 0,
             sound_timer: 0,
-            keys: [0; 16],
+            keys: [false; 16],
             display: [[0; 64]; 32],
             draw_flag: false,
         }
@@ -43,175 +43,210 @@ impl CPU {
         if opcode == 0 {
             return;
         }
-        println!("{:#04x}", opcode);
+        //println!("{:#04x}", opcode);
 
+        self.parse_opcode(opcode)
+    }
+
+    fn parse_opcode(&mut self,  opcode: u16) {
         match opcode & 0xf000 {
             0x0000 => match opcode {
-                0x00E0 => self.clear_screen(),
+                // CLS
+                0x00E0 => self.display = [[0; 64]; 32],
+                // RET
                 0x00EE => {
                     self.sp -= 1;
                     self.pc = self.stack[self.sp as usize];
                 }
                 _ => panic!("Unknown opcode: {:x}", opcode),
             },
-            0x1000 => self.jump(opcode),
-            0x2000 => self.call(opcode),
-            0x3000 => self.skip_if_equal(opcode),
-            0x4000 => self.skip_if_not_equal(opcode),
-            0x5000 => self.skip_if_equal_2(opcode),
-            0x6000 => self.set_reg(opcode),
-            0x7000 => self.add(opcode),
+            // JP addr
+            0x1000 => self.pc = opcode & 0x0fff,
+            // CALL addr
+            0x2000 => {
+                self.stack[self.sp as usize] = self.pc;
+                self.sp += 1;
+                self.pc = opcode & 0x0fff;
+            },
+            // SE Vx, byte
+            0x3000 => {
+                let x = ((opcode & 0x0f00) >> 8) as usize;
+                let nn = (opcode & 0x00ff) as u8;
+                if self.registers[x] == nn {
+                    self.pc += 2;
+                }
+            },
+            // SNE Vx, byte
+            0x4000 => {
+                let x = ((opcode & 0x0f00) >> 8) as usize;
+                let nn = (opcode & 0x00ff) as u8;
+                if self.registers[x] != nn {
+                    self.pc += 2;
+                }
+            },
+            // SE Vx, Vy
+            0x5000 => {
+                let x = ((opcode & 0x0f00) >> 8) as usize;
+                let y = ((opcode & 0x00f0) >> 4) as usize;
+                if self.registers[x] == self.registers[y] {
+                    self.pc += 2;
+                }
+            },
+            // LD Vx, byte
+            0x6000 => {
+                let x = ((opcode & 0x0f00) >> 8) as usize;
+                let nn = (opcode & 0x00ff) as u8;
+                self.registers[x] = nn;
+            },
+            // ADD Vx, byte
+            0x7000 => {
+                let x = ((opcode & 0x0f00) >> 8) as usize;
+                let nn = (opcode & 0x00ff) as u8;
+                self.registers[x] = self.registers[x].wrapping_add(nn);
+            },
             0x8000 => match opcode & 0x000f {
-                0x0000 => self.set_reg_2(opcode),
-                0x0001 => self.or(opcode),
-                0x0002 => self.and(opcode),
-                0x0003 => self.xor(opcode),
-                0x0004 => self.add_2(opcode),
-                0x0005 => self.sub(opcode),
-                0x0006 => self.shr(opcode),
-                0x0007 => self.sub_2(opcode),
-                0x000E => self.shl(opcode),
+                // LD Vx, Vy
+                0x0000 => {
+                    let x = ((opcode & 0x0f00) >> 8) as usize;
+                    let y = ((opcode & 0x00f0) >> 4) as usize;
+                    self.registers[x] = self.registers[y];
+                },
+                // OR Vx, Vy
+                0x0001 => {
+                    let x = ((opcode & 0x0f00) >> 8) as usize;
+                    let y = ((opcode & 0x00f0) >> 4) as usize;
+                    self.registers[x] |= self.registers[y];
+                },
+                // AND Vx, Vy
+                0x0002 => {
+                    let x = ((opcode & 0x0f00) >> 8) as usize;
+                    let y = ((opcode & 0x00f0) >> 4) as usize;
+                    self.registers[x] &= self.registers[y];
+                },
+                // XOR Vx, Vy
+                0x0003 => {
+                    let x = ((opcode & 0x0f00) >> 8) as usize;
+                    let y = ((opcode & 0x00f0) >> 4) as usize;
+                    self.registers[x] ^= self.registers[y];
+                },
+                // ADD Vx, Vy
+                0x0004 => {
+                    let x = ((opcode & 0x0f00) >> 8) as usize;
+                    let y = ((opcode & 0x00f0) >> 4) as usize;
+                    let (result, overflow) = self.registers[x].overflowing_add(self.registers[y]);
+                    self.registers[x] = result;
+                    self.registers[0xf] = if overflow { 1 } else { 0 };
+                },
+                // SUB Vx, Vy
+                0x0005 => {
+                    let x = ((opcode & 0x0f00) >> 8) as usize;
+                    let y = ((opcode & 0x00f0) >> 4) as usize;
+                    let (result, overflow) = self.registers[x].overflowing_sub(self.registers[y]);
+                    self.registers[x] = result;
+                    self.registers[0xf] = if overflow { 0 } else { 1 };
+                },
+                // SHR Vx, Vy
+                0x0006 => {
+                    let x = ((opcode & 0x0f00) >> 8) as usize;
+                    let vf = self.registers[x] & 1;
+                    self.registers[x] >>= 1;
+                    self.registers[0xf] = vf;
+                },
+                // SUBN Vx, Vy
+                0x0007 => {
+                    let x = ((opcode & 0x0f00) >> 8) as usize;
+                    let y = ((opcode & 0x00f0) >> 4) as usize;
+                    let (result, overflow) = self.registers[y].overflowing_sub(self.registers[x]);
+                    self.registers[x] = result;
+                    self.registers[0xf] = if overflow { 0 } else { 1 };
+                },
+                // SHL Vx, Vy
+                0x000e => {
+                    let x = ((opcode & 0x0f00) >> 8) as usize;
+                    let vf = self.registers[x] >> 7;
+                    self.registers[x] <<= 1;
+                    self.registers[0xf] = vf;
+                },
                 _ => panic!("Unknown opcode: {:x}", opcode),
             },
-            0x9000 => self.skip_if_not_equal_2(opcode),
-            0xa000 => self.set_index(opcode),
+            // SNE Vx, Vy
+            0x9000 => {
+                let x = ((opcode & 0x0f00) >> 8) as usize;
+                let y = ((opcode & 0x00f0) >> 4) as usize;
+                if self.registers[x] != self.registers[y] {
+                    self.pc += 2;
+                }
+            }
+            // LD I, addr
+            0xa000 => {
+                let nnn = opcode & 0x0fff;
+                self.index = nnn;
+            },
+            // DRW Vx, Vy, nibble
             0xd000 => self.draw(opcode),
+            0xe000 => {
+                let x = ((opcode & 0x0f00) >> 8) as usize;
+                match opcode & 0x00ff {
+                    // SKP Vx
+                    0x009e => {
+                        if self.keys[self.registers[x] as usize] {
+                            self.pc += 2;
+                        }
+                    },
+                    // SKNP Vx
+                    0x00a1 => {
+                        if !self.keys[self.registers[x] as usize] {
+                            self.pc += 2;
+                        }
+                    },
+                    _ => panic!("Unknown opcode: {:x}", opcode),
+                }
+            }
             0xf000 => match opcode & 0x00ff {
-                0x0033 => self.store_bcd(opcode),
-                0x0055 => self.store_registers(opcode),
-                0x0065 => self.load_registers(opcode),
-                0x001e => self.add_index(opcode),
+                0x000a => {
+                    let x = ((opcode & 0x0f00) >> 8) as usize;
+                    
+                },
+                0x0007 => {
+                    let x = ((opcode & 0x0f00) >> 8) as usize;
+                    self.registers[x] = self.delay_timer;
+                },
+                // LD DT, Vx
+                0x0015 => {
+                    let x = ((opcode & 0x0f00) >> 8) as usize;
+                    self.delay_timer = self.registers[x];
+                },
+                // LD B, Vx
+                0x0033 => {
+                    let x = ((opcode & 0x0f00) >> 8) as usize;
+                    let value = self.registers[x];
+                    self.memory[self.index as usize] = value / 100;
+                    self.memory[self.index as usize + 1] = (value / 10) % 10;
+                    self.memory[self.index as usize + 2] = (value % 100) % 10;
+                },
+                // LD [I], Vx
+                0x0055 => {
+                    let x = ((opcode & 0x0f00) >> 8) as usize;
+                    for i in 0..=x {
+                        self.memory[self.index as usize + i] = self.registers[i];
+                    }
+                },
+                // LD Vx, [I]
+                0x0065 => {
+                    let x = ((opcode & 0x0f00) >> 8) as usize;
+                    for i in 0..=x {
+                        self.registers[i] = self.memory[self.index as usize + i];
+                    }
+                },
+                // ADD I, Vx
+                0x001e => {
+                    let x = ((opcode & 0x0f00) >> 8) as usize;
+                    self.index += self.registers[x] as u16;
+                },
                 _ => panic!("Unknown opcode: {:x}", opcode),
             },
             _ => panic!("Unknown opcode: {:x}", opcode),
         }
-    }
-
-    fn jump(&mut self, opcode: u16) {
-        let nnn = opcode & 0x0FFF;
-        self.pc = nnn;
-    }
-
-    fn call(&mut self, opcode: u16) {
-        let nnn = opcode & 0x0FFF;
-        self.stack[self.sp as usize] = self.pc;
-        self.sp += 1;
-        self.pc = nnn;
-    }
-
-    fn clear_screen(&mut self) {
-        self.display = [[0; 64]; 32];
-    }
-
-    fn skip_if_equal(&mut self, opcode: u16) {
-        let x = ((opcode & 0x0F00) >> 8) as usize;
-        let nn = (opcode & 0x00FF) as u8;
-        if self.registers[x] == nn {
-            self.pc += 2;
-        }
-    }
-
-    fn skip_if_not_equal(&mut self, opcode: u16) {
-        let x = ((opcode & 0x0F00) >> 8) as usize;
-        let nn = (opcode & 0x00FF) as u8;
-        if self.registers[x] != nn {
-            self.pc += 2;
-        }
-    }
-
-    fn skip_if_equal_2(&mut self, opcode: u16) {
-        let x = ((opcode & 0x0F00) >> 8) as usize;
-        let y = ((opcode & 0x00F0) >> 4) as usize;
-        if self.registers[x] == self.registers[y] {
-            self.pc += 2;
-        }
-    }
-
-    fn set_reg(&mut self, opcode: u16) {
-        let x = ((opcode & 0x0F00) >> 8) as usize;
-        let nn = (opcode & 0x00FF) as u8;
-        self.registers[x] = nn;
-    }
-
-    fn add(&mut self, opcode: u16) {
-        let x = ((opcode & 0x0F00) >> 8) as usize;
-        let nn = (opcode & 0x00FF) as u8;
-        self.registers[x] = self.registers[x].wrapping_add(nn);
-    }
-
-    fn set_reg_2(&mut self, opcode: u16) {
-        let x = ((opcode & 0x0F00) >> 8) as usize;
-        let y = ((opcode & 0x00F0) >> 4) as usize;
-        self.registers[x] = self.registers[y];
-    }
-
-    fn or(&mut self, opcode: u16) {
-        let x = ((opcode & 0x0F00) >> 8) as usize;
-        let y = ((opcode & 0x00F0) >> 4) as usize;
-        self.registers[x] |= self.registers[y];
-    }
-
-    fn and(&mut self, opcode: u16) {
-        let x = ((opcode & 0x0F00) >> 8) as usize;
-        let y = ((opcode & 0x00F0) >> 4) as usize;
-        self.registers[x] &= self.registers[y];
-    }
-
-    fn xor(&mut self, opcode: u16) {
-        let x = ((opcode & 0x0F00) >> 8) as usize;
-        let y = ((opcode & 0x00F0) >> 4) as usize;
-        self.registers[x] ^= self.registers[y];
-    }
-
-    fn add_2(&mut self, opcode: u16) {
-        let x = ((opcode & 0x0F00) >> 8) as usize;
-        let y = ((opcode & 0x00F0) >> 4) as usize;
-        let (result, overflow) = self.registers[x].overflowing_add(self.registers[y]);
-        self.registers[x] = result;
-        self.registers[0xF] = if overflow { 1 } else { 0 };
-    }
-
-    fn sub(&mut self, opcode: u16) {
-        let x = ((opcode & 0x0F00) >> 8) as usize;
-        let y = ((opcode & 0x00F0) >> 4) as usize;
-        let (result, overflow) = self.registers[x].overflowing_sub(self.registers[y]);
-        self.registers[x] = result;
-        self.registers[0xF] = if overflow { 0 } else { 1 };
-    }
-
-    fn shr(&mut self, opcode: u16) {
-        let x = ((opcode & 0x0F00) >> 8) as usize;
-        let y = ((opcode & 0x00F0) >> 4) as usize;
-        self.registers[0xF] = self.registers[x] & 0x1;
-        self.registers[x] >>= 1;
-    }
-
-    fn sub_2(&mut self, opcode: u16) {
-        let x = ((opcode & 0x0F00) >> 8) as usize;
-        let y = ((opcode & 0x00F0) >> 4) as usize;
-        let (result, overflow) = self.registers[y].overflowing_sub(self.registers[x]);
-        self.registers[x] = result;
-        self.registers[0xF] = if overflow { 0 } else { 1 };
-    }
-
-    fn shl(&mut self, opcode: u16) {
-        let x = ((opcode & 0x0F00) >> 8) as usize;
-        let y = ((opcode & 0x00F0) >> 4) as usize;
-        self.registers[0xF] = self.registers[x] >> 7;
-        self.registers[x] <<= 1;
-    }
-
-    fn skip_if_not_equal_2(&mut self, opcode: u16) {
-        let x = ((opcode & 0x0F00) >> 8) as usize;
-        let y = ((opcode & 0x00F0) >> 4) as usize;
-        if self.registers[x] != self.registers[y] {
-            self.pc += 2;
-        }
-    }
-
-    fn set_index(&mut self, opcode: u16) {
-        let nnn = opcode & 0x0FFF;
-        self.index = nnn;
     }
 
     fn draw(&mut self, opcode: u16) {
@@ -236,32 +271,5 @@ impl CPU {
             }
         }
         self.draw_flag = true;
-    }
-
-    fn store_bcd(&mut self, opcode: u16) {
-        let x = ((opcode & 0x0F00) >> 8) as usize;
-        let value = self.registers[x];
-        self.memory[self.index as usize] = value / 100;
-        self.memory[self.index as usize + 1] = (value / 10) % 10;
-        self.memory[self.index as usize + 2] = (value % 100) % 10;
-    }
-
-    fn store_registers(&mut self, opcode: u16) {
-        let x = ((opcode & 0x0F00) >> 8) as usize;
-        for i in 0..=x {
-            self.memory[self.index as usize + i] = self.registers[i];
-        }
-    }
-
-    fn load_registers(&mut self, opcode: u16) {
-        let x = ((opcode & 0x0F00) >> 8) as usize;
-        for i in 0..=x {
-            self.registers[i] = self.memory[self.index as usize + i];
-        }
-    }
-
-    fn add_index(&mut self, opcode: u16) {
-        let x = ((opcode & 0x0F00) >> 8) as usize;
-        self.index += self.registers[x] as u16;
     }
 }
