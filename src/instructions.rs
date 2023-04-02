@@ -1,4 +1,4 @@
-use crate::cpu::CPU;
+use crate::arch::CPU;
 
 impl CPU {
     pub fn parse_opcode(&mut self, opcode: u16) {

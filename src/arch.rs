@@ -1,6 +1,6 @@
 use crate::display::DisplayDriver;
 use sdl2::{event::Event, keyboard::Keycode};
-use std::{collections::HashMap, error::Error, time::Duration};
+use std::{collections::HashMap, time::Duration};
 
 pub struct CPU {
     pub registers: [u8; 16],
@@ -16,11 +16,14 @@ pub struct CPU {
     pub display: [[u8; 64]; 32],
     pub fontset: Vec<u8>,
 
+    pub single_step: bool,
     pub draw_flag: bool,
+    pub rom_loaded: bool,
+    pub rom_path: String
 }
 
 impl CPU {
-    pub fn new() -> CPU {
+    pub fn new(rom_path: String) -> CPU {
         let fontset = vec![
             0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
             0x20, 0x60, 0x20, 0x20, 0x70, // 1
@@ -52,32 +55,62 @@ impl CPU {
             keys: [false; 16],
             display: [[0; 64]; 32],
             fontset,
+            single_step: false,
             draw_flag: false,
+            rom_loaded: false,
+            rom_path
         }
     }
 
-    pub fn run(&mut self) -> Result<(), Box<dyn Error>> {
-        if self.memory.is_empty() {
-            return Err("No ROM loaded".into());
+    pub async fn boot(&mut self) -> Result<(), crate::Error> {
+        if !self.rom_loaded {
+            self.load_rom().await;
         }
 
         let sdl_context = sdl2::init()?;
         let mut display_driver = DisplayDriver::new(&sdl_context, "chip-8 emulator");
         let mut event_pump = sdl_context.event_pump()?;
-        let keymap = self.load_keys();
+        let keymap = self.load_keys().await;
         let mut old_keys = vec![];
+        let mut step = false;
 
         'running: loop {
             for event in event_pump.poll_iter() {
                 match event {
-                    Event::Quit { .. }
-                    | Event::KeyDown {
-                        keycode: Some(Keycode::Escape),
+                    Event::KeyDown {
+                        keycode: Some(Keycode::Space),
                         ..
-                    } => break 'running,
-                    _ => {}
+                    } => self.print_registers().await,
+
+                    Event::KeyDown {
+                        keycode: Some(Keycode::H),
+                        ..
+                    } => self.single_step = !self.single_step,
+
+                    Event::KeyDown {
+                        keycode: Some(Keycode::J),
+                        ..
+                    } => {
+                        if !self.single_step {
+                            continue;
+                        }
+
+                        step = true;
+                    },
+
+                    Event::Quit { .. } => break 'running,
+
+                    _ => continue,
                 }
             }
+
+            for _ in 0..8 {
+                if !self.single_step || step {
+                    self.emulate_cycle().await;
+                    step = false;
+                }
+            }
+
             let new_keys = event_pump
                 .keyboard_state()
                 .pressed_scancodes()
@@ -85,18 +118,15 @@ impl CPU {
                 .collect::<Vec<_>>();
 
             for key in keymap.keys() {
-                if new_keys.contains(key) {
+                if old_keys.contains(key) {
                     self.keys[keymap[key]] = true;
                 } else {
                     self.keys[keymap[key]] = false;
                 }
             }
+
             old_keys.clear();
             old_keys.extend(new_keys);
-
-            for _ in 0..8 {
-                self.emulate_cycle();
-            }
 
             if self.draw_flag {
                 display_driver.draw(&self.display);
@@ -109,13 +139,18 @@ impl CPU {
         Ok(())
     }
 
-    pub fn load_rom(&mut self, rom: Vec<u8>) {
+    pub async fn load_rom(&mut self) {
+        let path = self.rom_path.clone();
+        let rom = std::fs::read(&path).unwrap();
+        println!("ROM: {} size:{:?} bytes", path, rom.len());
+
         for (i, byte) in rom.iter().enumerate() {
             self.memory[0x200 + i] = *byte;
         }
+        self.rom_loaded = true;
     }
 
-    pub fn load_keys(&self) -> HashMap<Keycode, usize> {
+    pub async fn load_keys(&self) -> HashMap<Keycode, usize> {
         let mut keymap = HashMap::new();
         keymap.insert(Keycode::Num1, 0x1);
         keymap.insert(Keycode::Num2, 0x2);
@@ -137,13 +172,15 @@ impl CPU {
         keymap
     }
 
-    pub fn emulate_cycle(&mut self) {
-        let opcode = (self.memory[self.pc as usize] as u16) << 8
-            | self.memory[(self.pc + 1) as usize] as u16;
+    pub async fn emulate_cycle(&mut self) {
+        let opcode = (self.memory[self.pc as usize] as u16) << 8 | self.memory[(self.pc + 1) as usize] as u16;
         self.pc += 2;
-        //println!("{:#04x}", opcode);
         if opcode == 0 {
             return;
+        }
+
+        if self.single_step {
+            println!("{:#04x}", opcode);
         }
 
         self.parse_opcode(opcode);
@@ -158,7 +195,7 @@ impl CPU {
         }
     }
 
-    pub fn print_registers(&self) {
+    pub async fn print_registers(&self) {
         println!("Registers:");
         for (i, reg) in self.registers.iter().enumerate() {
             println!("V{:X}: {:#04x}", i, reg);
