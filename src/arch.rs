@@ -68,7 +68,12 @@ impl CPU {
         }
 
         let sdl_context = sdl2::init()?;
-        let mut display_driver = DisplayDriver::new(&sdl_context, "chip-8 emulator");
+        let title = if self.single_step {
+            "CHIP-8 Emulator (Single Step)"
+        } else {
+            "CHIP-8 Emulator"
+        };
+        let mut display_driver = DisplayDriver::new(&sdl_context, &title);
         let mut event_pump = sdl_context.event_pump()?;
         let keymap = self.load_keys().await;
         let mut old_keys = vec![];

@@ -5,8 +5,9 @@ mod instructions;
 
 const CHIP8_WIDTH: usize = 64;
 const CHIP8_HEIGHT: usize = 32;
-const FPS: u32 = 60;
-const ROMS: [&str; 9] = [
+const FPS: u32 = 144;
+const ROMS: [&str; 10] = [
+    "pong.rom",
     "chip8-test-suite/bin/1-chip8-logo.ch8",
     "chip8-test-suite/bin/2-ibm-logo.ch8",
     "chip8-test-suite/bin/3-corax+.ch8",
@@ -22,9 +23,9 @@ pub type Error = Box<dyn std::error::Error>;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    let rom = ROMS[3];
+    let rom = ROMS[1];
     let mut cpu = arch::CPU::new(rom.to_string());
-    cpu.single_step = true;
+    cpu.single_step = false;
 
     if let Err(e) = cpu.boot().await {
         println!("Error: {}", e);
@@ -36,9 +37,10 @@ async fn main() -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use crate::arch;
+    use crate::ROMS;
 
     #[tokio::test]
-    async fn it_works() {
+    async fn test_init() {
         let cpu = arch::CPU::new("".to_string());
         assert_eq!(cpu.registers[0], 0);
         assert_eq!(cpu.memory[0], 0);
@@ -53,8 +55,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn emulate_cycle() {
-        let mut cpu = arch::CPU::new("chip8-test-suite/bin/1-chip8-logo.ch8".to_string());
+    async fn test_cycle() {
+        let mut cpu = arch::CPU::new(ROMS[0].to_string());
         cpu.emulate_cycle().await;
         assert_eq!(cpu.pc, 0x200 + 2);
     }
