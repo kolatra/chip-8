@@ -1,7 +1,7 @@
-use sdl2;
 use sdl2::pixels;
 use sdl2::rect::Rect;
 use sdl2::render::Canvas;
+use sdl2::Sdl;
 use sdl2::video::Window;
 
 use crate::CHIP8_HEIGHT;
@@ -16,7 +16,7 @@ pub struct DisplayDriver {
 }
 
 impl DisplayDriver {
-    pub fn new(sdl_context: &sdl2::Sdl, title: &str) -> Self {
+    pub fn new(sdl_context: &Sdl, title: &str) -> Self {
         let video_subsys = sdl_context.video().unwrap();
         let window = video_subsys
             .window(title, SCREEN_WIDTH, SCREEN_HEIGHT)
