@@ -43,8 +43,8 @@ type Error = Box<dyn std::error::Error>;
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     let mut cpu = c8::Cpu::new();
-    cpu.load_rom(ROMS[1]).await;
-    cpu.single_step = false;
+    cpu.load_rom(ROMS[4]).await;
+    cpu.single_step = true;
     cpu.boot().await
 }
 
@@ -64,7 +64,7 @@ mod tests {
         assert_eq!(cpu.delay_timer, 0);
         assert_eq!(cpu.sound_timer, 0);
         assert_eq!(cpu.display[0], [0; 64]);
-        
+
         for k in cpu.keys {
             assert!(!k);
         }

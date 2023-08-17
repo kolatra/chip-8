@@ -4,6 +4,7 @@ use std::{collections::HashMap, time::Duration};
 
 pub struct Cpu {
     pub memory: [u8; 4096],
+    pub stack: [u16; 16],
 
     pub pc: u16,
     pub sp: u8,
@@ -11,7 +12,6 @@ pub struct Cpu {
     pub i: u16,
     pub delay_timer: u8,
     pub sound_timer: u8,
-    pub stack: [u16; 16],
 
     pub keys: [bool; 16],
     pub display: [[u8; 64]; 32],
@@ -24,12 +24,12 @@ pub struct Cpu {
 impl Cpu {
     pub fn new() -> Cpu {
         Cpu {
+            memory: [0; 4096],
+            stack: [0; 16],
             pc: 0x200,
             sp: 0,
             vx: [0; 16],
-            memory: [0; 4096],
             i: 0,
-            stack: [0; 16],
             delay_timer: 0,
             sound_timer: 0,
             keys: [false; 16],
@@ -42,12 +42,12 @@ impl Cpu {
 
     pub async fn load_rom(&mut self, path: &str) {
         if self.rom_loaded {
-            println!("ROM already loaded");
+            println!("[!] ROM already loaded");
             return;
         }
 
         let rom = std::fs::read(path).unwrap();
-        println!("ROM: {} size: {:?} bytes", path, rom.len());
+        println!("[*] ROM: {} size: {:?} bytes", path, rom.len());
 
         for (i, byte) in rom.into_iter().enumerate() {
             self.memory[0x200 + i] = byte;
@@ -63,7 +63,7 @@ impl Cpu {
             "CHIP-8 Emulator"
         };
         let sdl_context = sdl2::init()?;
-        let keymap = self.load_keys().await;
+        let keymap = self.load_keys();
         let mut display_driver = DisplayDriver::new(&sdl_context, title);
         let mut event_pump = sdl_context.event_pump()?;
         let mut old_keys = vec![];
@@ -72,9 +72,8 @@ impl Cpu {
         loop {
             for event in event_pump.poll_iter() {
                 match self.check_keys(&mut step, event) {
-                    Ok(true) => {},
-                    Ok(false) => continue,
-                    Err(e) => return Err(e),
+                    Ok(true) => {}
+                    Ok(false) | Err(_) => continue,
                 }
             }
 
@@ -107,39 +106,7 @@ impl Cpu {
         }
     }
 
-    fn check_keys(&mut self, step: &mut bool, event: Event) -> Result<bool, crate::Error> {
-        match event {
-            Event::KeyDown {
-                keycode: Some(Keycode::Space),
-                ..
-            } => self.print_registers(),
-
-            Event::KeyDown {
-                keycode: Some(Keycode::H),
-                ..
-            } => self.single_step = !self.single_step,
-
-            Event::KeyDown {
-                keycode: Some(Keycode::J),
-                ..
-            } => {
-                if !self.single_step {
-                    return Ok(false);
-                } else {
-                    *step = true;
-                }
-
-            },
-
-            Event::Quit { .. } => return Err("Shutting down".into()),
-
-            _ => return Ok(false),
-        }
-
-        Ok(true)
-    }
-
-    async fn load_keys(&self) -> HashMap<Keycode, usize> {
+    fn load_keys(&self) -> HashMap<Keycode, usize> {
         let mut keymap = HashMap::new();
         keymap.insert(Keycode::Num1, 0x1);
         keymap.insert(Keycode::Num2, 0x2);
@@ -161,10 +128,43 @@ impl Cpu {
         keymap
     }
 
+    fn check_keys(&mut self, step: &mut bool, event: Event) -> Result<bool, crate::Error> {
+        match event {
+            Event::KeyDown {
+                keycode: Some(Keycode::Space),
+                ..
+            } => self.print_registers(),
+
+            Event::KeyDown {
+                keycode: Some(Keycode::H),
+                ..
+            } => self.single_step = !self.single_step,
+
+            Event::KeyDown {
+                keycode: Some(Keycode::J),
+                ..
+            } => {
+                if !self.single_step {
+                    return Ok(false);
+                } else {
+                    *step = true;
+                }
+            }
+
+            Event::Quit { .. } => return Err("Shutting down".into()),
+
+            _ => return Ok(false),
+        }
+
+        Ok(true)
+    }
+
+    fn opcode(&self) -> u16 {
+        (self.memory[self.pc as usize] as u16) << 8 | self.memory[(self.pc + 1) as usize] as u16
+    }
+
     pub async fn emulate_cycle(&mut self) {
-        let opcode = 
-            (self.memory[self.pc as usize] as u16) << 8 
-            | self.memory[(self.pc + 1) as usize] as u16;
+        let opcode = self.opcode();
 
         self.pc += 2;
         if opcode == 0 {
@@ -188,15 +188,15 @@ impl Cpu {
     }
 
     fn print_registers(&self) {
-        println!("Registers:");
+        println!("[*] Registers:");
         for (i, reg) in self.vx.iter().enumerate() {
-            println!("V{:X}: {:#04x}", i, reg);
+            println!("[*] V{:X}: {:#04x}", i, reg);
         }
-        println!("Index: {:#04x}", self.i);
-        println!("PC: {:#04x}", self.pc);
-        println!("SP: {:#04x}", self.sp);
-        println!("Delay timer: {:#04x}", self.delay_timer);
-        println!("Sound timer: {:#04x}", self.sound_timer);
+        println!("[*] Index: {:#04x}", self.i);
+        println!("[*] PC: {:#04x}", self.pc);
+        println!("[*] SP: {:#04x}", self.sp);
+        println!("[*] Delay timer: {:#04x}", self.delay_timer);
+        println!("[*] Sound timer: {:#04x}", self.sound_timer);
     }
 
     fn draw(&mut self, opcode: u16) {
@@ -231,31 +231,33 @@ impl Cpu {
     }
 
     fn execute(&mut self, opcode: u16) {
-        match opcode & 0xf000 {
+        let nibbles = (
+            ((opcode & 0xf000) >> 12) as u8,
+            ((opcode & 0x0f00) >> 8) as u8,
+            ((opcode & 0x00f0) >> 4) as u8,
+            (opcode & 0x000f) as u8,
+        );
 
-            0x0000 => match opcode {
-                // CLS
-                0x00E0 => self.display = [[0; 64]; 32],
-                // RET
-                0x00EE => {
-                    self.sp -= 1;
-                    self.pc = self.stack[self.sp as usize];
-                }
-                _ => panic!("Unknown opcode: {:x}", opcode),
-            },
+        match nibbles {
+            // CLS
+            (0x0, 0x0, 0xE, 0x0) => self.display = [[0; 64]; 32],
+            (0x0, 0x0, 0xE, 0xE) => {
+                self.sp -= 1;
+                self.pc = self.stack[self.sp as usize];
+            }
 
             // JP addr
-            0x1000 => self.pc = opcode & 0x0fff,
+            (0x1, _, _, _) => self.pc = opcode & 0x0fff,
 
             // CALL addr
-            0x2000 => {
+            (0x2, _, _, _) => {
                 self.stack[self.sp as usize] = self.pc;
                 self.sp += 1;
                 self.pc = opcode & 0x0fff;
             }
 
             // SE Vx, byte
-            0x3000 => {
+            (0x3, _, _, _) => {
                 let x = ((opcode & 0x0f00) >> 8) as usize;
                 let nn = (opcode & 0x00ff) as u8;
                 if self.vx[x] == nn {
@@ -264,7 +266,7 @@ impl Cpu {
             }
 
             // SNE Vx, byte
-            0x4000 => {
+            (0x4, _, _, _) => {
                 let x = ((opcode & 0x0f00) >> 8) as usize;
                 let nn = (opcode & 0x00ff) as u8;
                 if self.vx[x] != nn {
@@ -273,7 +275,7 @@ impl Cpu {
             }
 
             // SE Vx, Vy
-            0x5000 => {
+            (0x5, _, _, 0x0) => {
                 let x = ((opcode & 0x0f00) >> 8) as usize;
                 let y = ((opcode & 0x00f0) >> 4) as usize;
                 if self.vx[x] == self.vx[y] {
@@ -282,96 +284,99 @@ impl Cpu {
             }
 
             // LD Vx, byte
-            0x6000 => {
+            (0x6, _, _, _) => {
                 let x = ((opcode & 0x0f00) >> 8) as usize;
                 let nn = (opcode & 0x00ff) as u8;
                 self.vx[x] = nn;
             }
 
             // ADD Vx, byte
-            0x7000 => {
+            (0x7, _, _, _) => {
                 let x = ((opcode & 0x0f00) >> 8) as usize;
                 let nn = (opcode & 0x00ff) as u8;
                 self.vx[x] = self.vx[x].wrapping_add(nn);
             }
 
-            0x8000 => match opcode & 0x000f {
+            // LD Vx, Vy
+            (0x8, _, _, _) => match nibbles.3 {
                 // LD Vx, Vy
-                0x0000 => {
+                0x0 => {
                     let x = ((opcode & 0x0f00) >> 8) as usize;
                     let y = ((opcode & 0x00f0) >> 4) as usize;
                     self.vx[x] = self.vx[y];
                 }
 
-                // Performs a bitwise OR on the values of Vx and Vy, then stores the result in Vx. A bitwise OR compares the corrseponding bits from two values, and if either bit is 1, then the same bit in the result is also 1. Otherwise, it is 0.
                 // OR Vx, Vy
-                0x0001 => {
+                0x1 => {
                     let x = ((opcode & 0x0f00) >> 8) as usize;
                     let y = ((opcode & 0x00f0) >> 4) as usize;
                     self.vx[x] |= self.vx[y];
                 }
 
                 // AND Vx, Vy
-                0x0002 => {
+                0x2 => {
                     let x = ((opcode & 0x0f00) >> 8) as usize;
                     let y = ((opcode & 0x00f0) >> 4) as usize;
                     self.vx[x] &= self.vx[y];
                 }
 
                 // XOR Vx, Vy
-                0x0003 => {
+                0x3 => {
                     let x = ((opcode & 0x0f00) >> 8) as usize;
                     let y = ((opcode & 0x00f0) >> 4) as usize;
                     self.vx[x] ^= self.vx[y];
                 }
 
                 // ADD Vx, Vy
-                0x0004 => {
+                0x4 => {
                     let x = ((opcode & 0x0f00) >> 8) as usize;
                     let y = ((opcode & 0x00f0) >> 4) as usize;
-                    let (result, overflow) = self.vx[x].overflowing_add(self.vx[y]);
-                    self.vx[x] = result;
-                    self.vx[0xf] = if overflow { 1 } else { 0 };
+
+                    let (res, overflow) = self.vx[x].overflowing_add(self.vx[y]);
+                    self.vx[x] = res;
+                    self.vx[0xF] = overflow as u8;
                 }
 
                 // SUB Vx, Vy
-                0x0005 => {
+                0x5 => {
                     let x = ((opcode & 0x0f00) >> 8) as usize;
                     let y = ((opcode & 0x00f0) >> 4) as usize;
-                    let (result, overflow) = self.vx[x].overflowing_sub(self.vx[y]);
-                    self.vx[x] = result;
-                    self.vx[0xf] = if overflow { 0 } else { 1 };
+
+                    let (res, overflow) = self.vx[x].overflowing_sub(self.vx[y]);
+                    self.vx[x] = res;
+                    self.vx[0xF] = overflow as u8;
                 }
 
                 // SHR Vx, Vy
-                0x0006 => {
+                0x6 => {
                     let x = ((opcode & 0x0f00) >> 8) as usize;
                     let vf = self.vx[x] & 1;
                     self.vx[x] >>= 1;
                     self.vx[0xf] = vf;
                 }
-                
+
                 // SUBN Vx, Vy
-                0x0007 => {
+                0x7 => {
                     let x = ((opcode & 0x0f00) >> 8) as usize;
                     let y = ((opcode & 0x00f0) >> 4) as usize;
                     let (result, overflow) = self.vx[y].overflowing_sub(self.vx[x]);
                     self.vx[x] = result;
-                    self.vx[0xf] = if overflow { 0 } else { 1 };
+                    self.vx[0xf] = overflow as u8;
                 }
 
                 // SHL Vx, Vy
-                0x000e => {
+                0xe => {
                     let x = ((opcode & 0x0f00) >> 8) as usize;
                     let vf = self.vx[x] >> 7;
                     self.vx[x] <<= 1;
                     self.vx[0xf] = vf;
                 }
 
-                _ => panic!("Unknown opcode: {:x}", opcode),
-            },
+                _ => panic!("Unknown opcode: {:#x}", opcode),
+            }
+
             // SNE Vx, Vy
-            0x9000 => {
+            (0x9, _, _, 0x0) => {
                 let x = ((opcode & 0x0f00) >> 8) as usize;
                 let y = ((opcode & 0x00f0) >> 4) as usize;
                 if self.vx[x] != self.vx[y] {
@@ -380,28 +385,28 @@ impl Cpu {
             }
 
             // LD I, addr
-            0xa000 => {
+            (0xa, _, _, _) => {
                 let nnn = opcode & 0x0fff;
                 self.i = nnn;
             }
 
             // JP V0, addr
-            0xb000 => {
+            (0xb, _, _, _) => {
                 let nnn = opcode & 0x0fff;
                 self.pc = self.vx[0] as u16 + nnn;
             }
 
             // RND Vx, byte
-            0xc000 => {
+            (0xc, _, _, _) => {
                 let x = ((opcode & 0x0f00) >> 8) as usize;
                 let nn = (opcode & 0x00ff) as u8;
                 self.vx[x] = rand::random::<u8>() & nn;
             }
 
             // DRW Vx, Vy, nibble
-            0xd000 => self.draw(opcode),
+            (0xd, _, _, _) => self.draw(opcode),
 
-            0xe000 => {
+            (0xe, _, _, _) => {
                 let x = ((opcode & 0x0f00) >> 8) as usize;
                 match opcode & 0x00ff {
                     // SKP Vx
@@ -420,33 +425,33 @@ impl Cpu {
                 }
             }
 
-            0xf000 => match opcode & 0x00ff {
-                // LD Vx, K
-                0x000a => {
-                    let _x = ((opcode & 0x0f00) >> 8) as usize;
-                }
-
+            (0xf, _, _, _) => match (nibbles.2, nibbles.3) {
                 // LD Vx, DT
-                0x0007 => {
+                (0x0, 0x7) => {
                     let x = ((opcode & 0x0f00) >> 8) as usize;
                     self.vx[x] = self.delay_timer;
                 }
 
+                // LD Vx, K
+                (0x0, 0xa) => {
+                    let _x = ((opcode & 0x0f00) >> 8) as usize;
+                }
+
                 // LD DT, Vx
-                0x0015 => {
+                (0x1, 0x5) => {
                     let x = ((opcode & 0x0f00) >> 8) as usize;
                     self.delay_timer = self.vx[x];
                 }
 
                 // Sets I to the location of the sprite for the character in VX.
-                0x0029 => {
+                (0x1, 0x8) => {
                     let x = ((opcode & 0x0f00) >> 8) as usize;
                     let vx = self.vx[x] as usize;
                     self.i = crate::FONTSET[vx] as u16;
                 }
 
                 // LD B, Vx
-                0x0033 => {
+                (0x3, 0x3) => {
                     let x = ((opcode & 0x0f00) >> 8) as usize;
                     let value = self.vx[x];
                     self.memory[self.i as usize] = value / 100;
@@ -455,7 +460,7 @@ impl Cpu {
                 }
 
                 // LD [I], Vx
-                0x0055 => {
+                (0x5, 0x5) => {
                     let x = ((opcode & 0x0f00) >> 8) as usize;
                     for i in 0..=x {
                         self.memory[self.i as usize + i] = self.vx[i];
@@ -463,7 +468,7 @@ impl Cpu {
                 }
 
                 // LD Vx, [I]
-                0x0065 => {
+                (0x6, 0x5) => {
                     let x = ((opcode & 0x0f00) >> 8) as usize;
                     for i in 0..=x {
                         self.vx[i] = self.memory[self.i as usize + i];
@@ -471,7 +476,7 @@ impl Cpu {
                 }
 
                 // ADD I, Vx
-                0x001e => {
+                (0x1, 0xe) => {
                     let x = ((opcode & 0x0f00) >> 8) as usize;
                     self.i += self.vx[x] as u16;
                 }

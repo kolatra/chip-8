@@ -1,8 +1,8 @@
 use sdl2::pixels;
 use sdl2::rect::Rect;
 use sdl2::render::Canvas;
-use sdl2::Sdl;
 use sdl2::video::Window;
+use sdl2::Sdl;
 
 use crate::CHIP8_HEIGHT;
 use crate::CHIP8_WIDTH;
